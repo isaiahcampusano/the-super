@@ -11,9 +11,11 @@ The starter scene includes:
 - an orbit, pan, and zoom camera;
 - Dear ImGui controls;
 - reusable shader and generic point-cloud wrappers;
-- a dynamic proton/neutron nucleus driven by Yukawa attraction and softened Coulomb
-  repulsion;
+- stable, fusion, and fission scenarios driven by Yukawa attraction and softened
+  Coulomb repulsion;
 - real-time controls for force strength, damping, and simulation speed.
+- an optional four-second cinematic bridge from the reaction trigger to a flash,
+  fireball, shockwave, and rising mushroom cloud.
 
 ## Build
 
@@ -33,6 +35,16 @@ requires a working graphical environment.
 Use `--physics-test` to advance the default nucleus for 600 steps without opening a
 window and verify that its positions remain finite, bounded, and dynamic.
 
+Use `--scenario-test` to verify stable-mode pause/reset, fusion triggering, fission
+timing, and fragment separation without opening a window.
+
+Use `--cinematic-test` to render the complete explosion lifecycle in a hidden window
+and verify that the fireball and mushroom-cloud particle stages both spawn.
+
+For an immediately running presentation, launch with `--demo-stable`, `--demo-fusion`,
+or `--demo-fission`. Use `--demo-cinematic` to preview the four-second macro effect
+immediately without waiting for a reaction trigger.
+
 ## Controls
 
 - Left-drag to orbit.
@@ -40,6 +52,14 @@ window and verify that its positions remain finite, bounded, and dynamic.
 - Scroll to zoom.
 - Press `R` to reset the camera.
 - Press `Esc` to exit.
+
+Choose a scenario in the control panel, then use **Start**, **Pause**, and **Reset**.
+Fusion begins with two incoming seven-nucleon clusters; fission splits a thirty-nucleon
+cluster after three simulated seconds. The progress bar and green event message show
+when either reaction triggers.
+
+Enable **Cinematic Explosion** before pressing **Start** to translate that microscopic
+trigger into a scripted four-second flash, fireball, shockwave, and mushroom cloud.
 
 ## Next steps
 

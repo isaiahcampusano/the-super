@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <numbers>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -24,6 +25,7 @@
 #include <imgui_impl_opengl3.h>
 
 #include "the_super/Camera.hpp"
+#include "the_super/CinematicExplosion.hpp"
 #include "the_super/Nucleus.hpp"
 #include "the_super/PointCloudRenderer.hpp"
 #include "the_super/ShaderProgram.hpp"
@@ -60,7 +62,7 @@ struct SceneSettings {
     float strongForce {1.0F};
     float coulombForce {0.5F};
     float damping {0.999F};
-    bool animate {true};
+    bool cinematicMode {false};
     bool showGuidePoints {true};
 };
 
@@ -257,40 +259,85 @@ std::vector<the_super::PointSample> guidePoints(const the_super::Nucleus& nucleu
     return points;
 }
 
+const char* statusName(the_super::SimulationStatus status) {
+    switch (status) {
+    case the_super::SimulationStatus::Idle:
+        return "Idle";
+    case the_super::SimulationStatus::Running:
+        return "Running";
+    case the_super::SimulationStatus::Paused:
+        return "Paused";
+    case the_super::SimulationStatus::Triggered:
+        return "Event triggered";
+    }
+    return "Unknown";
+}
+
+float scenarioCameraDistance(the_super::Scenario scenario) {
+    return scenario == the_super::Scenario::Stable ? 9.0F : 13.0F;
+}
+
 void drawControls(
     SceneSettings& settings,
     AppState& state,
-    the_super::Nucleus& nucleus
+    the_super::Nucleus& nucleus,
+    const the_super::CinematicExplosion& explosion
 ) {
     ImGui::SetNextWindowPos(ImVec2(18.0F, 18.0F), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(330.0F, 0.0F), ImGuiCond_FirstUseEver);
     ImGui::Begin("The Super", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::TextUnformatted("Dynamic nuclear particle simulation");
     ImGui::Separator();
+    int scenarioIndex = static_cast<int>(nucleus.getScenario());
+    const char* scenarios[] {"Stable", "Fusion", "Fission"};
+    if (ImGui::Combo("Scenario", &scenarioIndex, scenarios, 3)) {
+        const auto scenario = static_cast<the_super::Scenario>(scenarioIndex);
+        nucleus.initialize(scenario);
+        state.resetDistance = scenarioCameraDistance(scenario);
+        state.camera.reset(state.resetDistance);
+    }
+
+    if (ImGui::Button("Start")) {
+        nucleus.start();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Pause")) {
+        nucleus.pause();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reset")) {
+        nucleus.reset();
+    }
+
     ImGui::Text("Nucleons: %zu", nucleus.getNucleons().size());
-    ImGui::TextColored(
-        settings.animate
-            ? ImVec4(0.35F, 0.95F, 0.45F, 1.0F)
-            : ImVec4(1.0F, 0.75F, 0.25F, 1.0F),
-        settings.animate ? "Physics Running" : "Physics Paused"
-    );
+    ImGui::Text("Status: %s", statusName(nucleus.getStatus()));
+    if (nucleus.hasTriggered()) {
+        ImGui::TextColored(ImVec4(0.2F, 1.0F, 0.35F, 1.0F), "EVENT TRIGGERED!");
+    }
+    if (nucleus.getScenario() != the_super::Scenario::Stable) {
+        ImGui::ProgressBar(nucleus.getTriggerProgress(), ImVec2(-1.0F, 0.0F));
+    }
     ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
     ImGui::SliderFloat("Nucleon size", &settings.nucleonScale, 0.15F, 0.75F, "%.2f");
-    ImGui::Checkbox("Run physics", &settings.animate);
     ImGui::SliderFloat("Animation speed", &settings.animationSpeed, 0.0F, 3.0F, "%.2f");
     ImGui::SliderFloat("Strong Force (g)", &settings.strongForce, 0.0F, 2.0F, "%.3f");
     ImGui::SliderFloat("Coulomb (k)", &settings.coulombForce, 0.0F, 1.0F, "%.3f");
     ImGui::SliderFloat("Damping", &settings.damping, 0.99F, 1.0F, "%.4f");
+    ImGui::Checkbox("Cinematic Explosion", &settings.cinematicMode);
+    if (explosion.isActive()) {
+        ImGui::TextColored(
+            ImVec4(1.0F, 0.55F, 0.12F, 1.0F),
+            "Cinematic: %.1fs | %zu particles",
+            explosion.elapsed(),
+            explosion.particleCount()
+        );
+    }
     ImGui::Checkbox("Show guide points", &settings.showGuidePoints);
     if (settings.showGuidePoints) {
         ImGui::SliderFloat("Guide point size", &settings.guidePointSize, 1.0F, 12.0F, "%.1f");
     }
     if (ImGui::Button("Reset camera")) {
         state.camera.reset(state.resetDistance);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Reset nucleus")) {
-        nucleus.reset();
     }
     ImGui::Separator();
     ImGui::TextColored(ImVec4(0.96F, 0.28F, 0.20F, 1.0F), "Red: proton");
@@ -301,7 +348,13 @@ void drawControls(
     ImGui::End();
 }
 
-int run(const char* executablePath, bool smokeTest) {
+int run(
+    const char* executablePath,
+    bool smokeTest,
+    std::optional<the_super::Scenario> demoScenario = std::nullopt,
+    bool cinematicTest = false,
+    bool cinematicPreview = false
+) {
     glfwSetErrorCallback(glfwErrorCallback);
     if (glfwInit() != GLFW_TRUE) {
         throw std::runtime_error("Could not initialize GLFW");
@@ -311,7 +364,7 @@ int run(const char* executablePath, bool smokeTest) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    if (smokeTest) {
+    if (smokeTest || cinematicTest) {
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     }
 #ifdef __APPLE__
@@ -327,7 +380,7 @@ int run(const char* executablePath, bool smokeTest) {
     }
 
     glfwMakeContextCurrent(window.get());
-    glfwSwapInterval(1);
+    glfwSwapInterval(smokeTest || cinematicTest ? 0 : 1);
     if (gladLoadGL(glfwGetProcAddress) == 0) {
         throw std::runtime_error("Could not load OpenGL functions with GLAD");
     }
@@ -349,11 +402,27 @@ int run(const char* executablePath, bool smokeTest) {
     const std::filesystem::path shaders = shaderDirectory(executablePath);
     the_super::ShaderProgram sphereShader(shaders / "nucleus.vert", shaders / "nucleus.frag");
     the_super::PointCloudRenderer pointRenderer(shaders);
+    the_super::CinematicExplosion explosion(shaders);
     const Mesh sphere = createSphere(28U, 40U);
     the_super::Nucleus nucleus;
+    nucleus.initialize(demoScenario.value_or(the_super::Scenario::Stable));
+    state.resetDistance = scenarioCameraDistance(nucleus.getScenario());
+    state.camera.reset(state.resetDistance);
+    if (smokeTest || demoScenario.has_value()) {
+        nucleus.start();
+    }
     SceneSettings settings;
+    if (demoScenario.has_value() || cinematicPreview) {
+        settings.cinematicMode = true;
+    }
+    if (cinematicTest || cinematicPreview) {
+        explosion.trigger(glm::vec3 {0.0F});
+    }
 
     int completedFrames = 0;
+    std::size_t peakExplosionParticles = explosion.particleCount();
+    float peakFlashIntensity = explosion.flashIntensity();
+    bool previousReactionTriggered = false;
     double previousTime = glfwGetTime();
     while (glfwWindowShouldClose(window.get()) == GLFW_FALSE) {
         glfwPollEvents();
@@ -364,7 +433,7 @@ int run(const char* executablePath, bool smokeTest) {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        drawControls(settings, state, nucleus);
+        drawControls(settings, state, nucleus, explosion);
 
         nucleus.setPhysicsParameters({
             settings.strongForce,
@@ -373,8 +442,29 @@ int run(const char* executablePath, bool smokeTest) {
             settings.damping,
             5.0F,
         });
-        if (settings.animate) {
-            nucleus.updatePhysics(deltaTime * settings.animationSpeed);
+        const float frameDelta = cinematicTest ? 1.0F / 60.0F : deltaTime;
+        if (nucleus.getStatus() == the_super::SimulationStatus::Running
+            || nucleus.getStatus() == the_super::SimulationStatus::Triggered) {
+            nucleus.updatePhysics(frameDelta * settings.animationSpeed);
+        }
+
+        const bool reactionTriggered = nucleus.hasTriggered();
+        if (reactionTriggered && !previousReactionTriggered && settings.cinematicMode) {
+            explosion.trigger(glm::vec3 {0.0F});
+        }
+        previousReactionTriggered = reactionTriggered;
+        if (!settings.cinematicMode || nucleus.getStatus() == the_super::SimulationStatus::Idle) {
+            if (!cinematicTest && !cinematicPreview) {
+                explosion.reset();
+            }
+        }
+        if (cinematicPreview && !explosion.isActive()) {
+            explosion.trigger(glm::vec3 {0.0F});
+        }
+        if (explosion.isActive()) {
+            explosion.update(frameDelta);
+            peakExplosionParticles = std::max(peakExplosionParticles, explosion.particleCount());
+            peakFlashIntensity = std::max(peakFlashIntensity, explosion.flashIntensity());
         }
 
         int framebufferWidth = 0;
@@ -406,9 +496,12 @@ int run(const char* executablePath, bool smokeTest) {
         sphereShader.set("projection", projection);
         sphereShader.set("cameraPosition", state.camera.position());
         glBindVertexArray(sphere.vertexArray);
+        const float scenarioScale = nucleus.getScenario() == the_super::Scenario::Fission
+            ? settings.nucleonScale * 0.65F
+            : settings.nucleonScale;
         for (const the_super::Nucleon& nucleon : nucleus.getNucleons()) {
             glm::mat4 model = glm::translate(glm::mat4 {1.0F}, nucleon.position);
-            model = glm::scale(model, glm::vec3 {settings.nucleonScale});
+            model = glm::scale(model, glm::vec3 {scenarioScale});
             sphereShader.set("model", model);
             sphereShader.set(
                 "baseColor",
@@ -419,11 +512,16 @@ int run(const char* executablePath, bool smokeTest) {
             glDrawElements(GL_TRIANGLES, sphere.indexCount, GL_UNSIGNED_INT, nullptr);
         }
 
+        explosion.render(view, projection);
+
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window.get());
 
-        if (smokeTest && ++completedFrames >= 3) {
+        ++completedFrames;
+        if (smokeTest && completedFrames >= 3) {
+            glfwSetWindowShouldClose(window.get(), GLFW_TRUE);
+        } else if (cinematicTest && !explosion.isActive()) {
             glfwSetWindowShouldClose(window.get(), GLFW_TRUE);
         }
     }
@@ -432,12 +530,26 @@ int run(const char* executablePath, bool smokeTest) {
     if (smokeTest) {
         std::cout << "smoke-test: simulated and rendered " << nucleus.getNucleons().size()
                   << " nucleons\n";
+    } else if (cinematicTest) {
+        if (peakExplosionParticles < 1'400 || peakFlashIntensity < 0.80F) {
+            throw std::runtime_error("Cinematic test did not spawn the full particle sequence");
+        }
+        explosion.trigger(glm::vec3 {0.0F});
+        explosion.reset();
+        if (explosion.isActive() || explosion.particleCount() != 0) {
+            throw std::runtime_error("Cinematic reset did not clear the effect");
+        }
+        std::cout << "cinematic-test: rendered " << completedFrames
+                  << " frames, peak particles=" << peakExplosionParticles
+                  << ", peak flash=" << peakFlashIntensity << '\n';
     }
     return 0;
 }
 
 int runPhysicsSmokeTest() {
     the_super::Nucleus nucleus;
+    nucleus.initialize(the_super::Scenario::Stable);
+    nucleus.start();
     std::vector<glm::vec3> initialPositions;
     initialPositions.reserve(nucleus.getNucleons().size());
     for (const the_super::Nucleon& nucleon : nucleus.getNucleons()) {
@@ -484,6 +596,102 @@ int runPhysicsSmokeTest() {
     return 0;
 }
 
+int runScenarioSmokeTest() {
+    constexpr float testStep = 1.0F / 120.0F;
+    const auto protonCount = [](const the_super::Nucleus& nucleus) {
+        return std::count_if(
+            nucleus.getNucleons().begin(),
+            nucleus.getNucleons().end(),
+            [](const the_super::Nucleon& nucleon) { return nucleon.isProton; }
+        );
+    };
+
+    the_super::Nucleus stable;
+    stable.initialize(the_super::Scenario::Stable);
+    if (stable.getNucleons().size() != 7
+        || protonCount(stable) != 4
+        || stable.getStatus() != the_super::SimulationStatus::Idle) {
+        throw std::runtime_error("Stable scenario did not initialize seven idle nucleons");
+    }
+    stable.start();
+    for (int step = 0; step < 120; ++step) {
+        stable.updatePhysics(testStep);
+    }
+    const auto pausedPositions = stable.getNucleons();
+    stable.pause();
+    stable.updatePhysics(1.0F);
+    for (std::size_t index = 0; index < pausedPositions.size(); ++index) {
+        if (stable.getNucleons()[index].position != pausedPositions[index].position) {
+            throw std::runtime_error("Pause did not freeze the stable scenario");
+        }
+    }
+    stable.reset();
+    if (stable.getStatus() != the_super::SimulationStatus::Idle || stable.hasTriggered()) {
+        throw std::runtime_error("Reset did not restore the stable scenario to idle");
+    }
+
+    the_super::Nucleus fusion;
+    fusion.initialize(the_super::Scenario::Fusion);
+    if (fusion.getNucleons().size() != 14 || protonCount(fusion) != 8) {
+        throw std::runtime_error("Fusion scenario did not initialize fourteen nucleons");
+    }
+    fusion.start();
+    int fusionSteps = 0;
+    while (!fusion.hasTriggered() && fusionSteps < 2'400) {
+        fusion.updatePhysics(testStep);
+        ++fusionSteps;
+    }
+    if (!fusion.hasTriggered() || fusion.getTriggerProgress() < 1.0F) {
+        throw std::runtime_error("Fusion scenario did not trigger within twenty seconds");
+    }
+
+    the_super::Nucleus fission;
+    fission.initialize(the_super::Scenario::Fission);
+    if (fission.getNucleons().size() != 30 || protonCount(fission) != 20) {
+        throw std::runtime_error("Fission scenario did not initialize thirty nucleons");
+    }
+    fission.start();
+    int fissionSteps = 0;
+    while (!fission.hasTriggered() && fissionSteps < 480) {
+        fission.updatePhysics(testStep);
+        ++fissionSteps;
+    }
+    if (!fission.hasTriggered() || fissionSteps < 350) {
+        throw std::runtime_error("Fission scenario trigger timing was incorrect");
+    }
+    for (int step = 0; step < 120; ++step) {
+        fission.updatePhysics(testStep);
+    }
+
+    glm::vec3 leftCenter {0.0F};
+    glm::vec3 rightCenter {0.0F};
+    int leftCount = 0;
+    int rightCount = 0;
+    for (const the_super::Nucleon& nucleon : fission.getNucleons()) {
+        if (nucleon.position.x < 0.0F) {
+            leftCenter += nucleon.position;
+            ++leftCount;
+        } else {
+            rightCenter += nucleon.position;
+            ++rightCount;
+        }
+    }
+    if (leftCount == 0 || rightCount == 0) {
+        throw std::runtime_error("Fission scenario did not create two fragments");
+    }
+    leftCenter /= static_cast<float>(leftCount);
+    rightCenter /= static_cast<float>(rightCount);
+    const float fragmentSeparation = glm::length(rightCenter - leftCenter);
+    if (fragmentSeparation < 2.0F) {
+        throw std::runtime_error("Fission fragments did not separate visibly");
+    }
+
+    std::cout << "scenario-test: stable pause/reset passed, fusion triggered after "
+              << fusionSteps << " steps, fission triggered after " << fissionSteps
+              << " steps, fragment separation=" << fragmentSeparation << '\n';
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -492,6 +700,24 @@ int main(int argc, char* argv[]) {
         const bool smokeTest = argc > 1 && std::string_view(argv[1]) == "--smoke-test";
         if (argc > 1 && std::string_view(argv[1]) == "--physics-test") {
             return runPhysicsSmokeTest();
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--scenario-test") {
+            return runScenarioSmokeTest();
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--cinematic-test") {
+            return run(executablePath, false, std::nullopt, true);
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--demo-cinematic") {
+            return run(executablePath, false, std::nullopt, false, true);
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--demo-stable") {
+            return run(executablePath, false, the_super::Scenario::Stable);
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--demo-fusion") {
+            return run(executablePath, false, the_super::Scenario::Fusion);
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--demo-fission") {
+            return run(executablePath, false, the_super::Scenario::Fission);
         }
         return run(executablePath, smokeTest);
     } catch (const std::exception& exception) {
