@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +23,7 @@
 #include <imgui_impl_opengl3.h>
 
 #include "the_super/Camera.hpp"
+#include "the_super/Nucleus.hpp"
 #include "the_super/PointCloudRenderer.hpp"
 #include "the_super/ShaderProgram.hpp"
 
@@ -44,21 +44,6 @@ struct Mesh {
     GLsizei indexCount {};
 };
 
-struct Nucleon {
-    glm::vec3 position;
-    bool proton;
-};
-
-constexpr std::array<Nucleon, 7> placeholderNucleus {{
-    {{0.0F, 0.0F, 0.0F}, true},
-    {{0.9F, 0.0F, 0.0F}, false},
-    {{-0.9F, 0.0F, 0.0F}, false},
-    {{0.0F, 0.9F, 0.0F}, true},
-    {{0.0F, -0.9F, 0.0F}, true},
-    {{0.0F, 0.0F, 0.9F}, false},
-    {{0.0F, 0.0F, -0.9F}, true},
-}};
-
 struct AppState {
     the_super::OrbitCamera camera;
     float resetDistance {9.0F};
@@ -71,6 +56,9 @@ struct SceneSettings {
     float nucleonScale {0.62F};
     float animationSpeed {0.8F};
     float guidePointSize {4.0F};
+    float strongForce {1.0F};
+    float coulombForce {0.5F};
+    float damping {0.999F};
     bool animate {true};
     bool showGuidePoints {true};
 };
@@ -259,31 +247,48 @@ std::filesystem::path shaderDirectory(const char* executablePath) {
     return std::filesystem::absolute(executablePath).parent_path() / "assets" / "shaders";
 }
 
-std::array<the_super::PointSample, placeholderNucleus.size()> guidePoints() {
-    std::array<the_super::PointSample, placeholderNucleus.size()> points {};
-    for (std::size_t index = 0; index < placeholderNucleus.size(); ++index) {
-        const Nucleon& nucleon = placeholderNucleus[index];
-        points[index] = {nucleon.position * 1.8F, 1.0F, nucleon.proton ? 0.0F : 1.0F};
+std::vector<the_super::PointSample> guidePoints(const the_super::Nucleus& nucleus) {
+    std::vector<the_super::PointSample> points;
+    points.reserve(nucleus.getNucleons().size());
+    for (const the_super::Nucleon& nucleon : nucleus.getNucleons()) {
+        points.push_back({nucleon.position, 1.0F, nucleon.isProton ? 0.0F : 1.0F});
     }
     return points;
 }
 
-void drawControls(SceneSettings& settings, AppState& state) {
+void drawControls(
+    SceneSettings& settings,
+    AppState& state,
+    the_super::Nucleus& nucleus
+) {
     ImGui::SetNextWindowPos(ImVec2(18.0F, 18.0F), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(330.0F, 0.0F), ImGuiCond_FirstUseEver);
     ImGui::Begin("The Super", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::TextUnformatted("Nuclear visualization foundation");
+    ImGui::TextUnformatted("Dynamic nuclear particle simulation");
     ImGui::Separator();
-    ImGui::Text("Placeholder nucleus: %zu nucleons", placeholderNucleus.size());
+    ImGui::Text("Nucleons: %zu", nucleus.getNucleons().size());
+    ImGui::TextColored(
+        settings.animate
+            ? ImVec4(0.35F, 0.95F, 0.45F, 1.0F)
+            : ImVec4(1.0F, 0.75F, 0.25F, 1.0F),
+        settings.animate ? "Physics Running" : "Physics Paused"
+    );
     ImGui::SliderFloat("Nucleon size", &settings.nucleonScale, 0.25F, 1.0F, "%.2f");
-    ImGui::Checkbox("Animate", &settings.animate);
+    ImGui::Checkbox("Run physics", &settings.animate);
     ImGui::SliderFloat("Animation speed", &settings.animationSpeed, 0.0F, 3.0F, "%.2f");
+    ImGui::SliderFloat("Strong Force (g)", &settings.strongForce, 0.0F, 2.0F, "%.3f");
+    ImGui::SliderFloat("Coulomb (k)", &settings.coulombForce, 0.0F, 1.0F, "%.3f");
+    ImGui::SliderFloat("Damping", &settings.damping, 0.99F, 1.0F, "%.4f");
     ImGui::Checkbox("Show guide points", &settings.showGuidePoints);
     if (settings.showGuidePoints) {
         ImGui::SliderFloat("Guide point size", &settings.guidePointSize, 1.0F, 12.0F, "%.1f");
     }
     if (ImGui::Button("Reset camera")) {
         state.camera.reset(state.resetDistance);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reset nucleus")) {
+        nucleus.reset();
     }
     ImGui::Separator();
     ImGui::TextColored(ImVec4(0.96F, 0.28F, 0.20F, 1.0F), "Red: proton");
@@ -342,18 +347,33 @@ int run(const char* executablePath, bool smokeTest) {
     const std::filesystem::path shaders = shaderDirectory(executablePath);
     the_super::ShaderProgram sphereShader(shaders / "nucleus.vert", shaders / "nucleus.frag");
     the_super::PointCloudRenderer pointRenderer(shaders);
-    const auto points = guidePoints();
-    pointRenderer.upload(points);
     const Mesh sphere = createSphere(28U, 40U);
+    the_super::Nucleus nucleus;
     SceneSettings settings;
 
     int completedFrames = 0;
+    double previousTime = glfwGetTime();
     while (glfwWindowShouldClose(window.get()) == GLFW_FALSE) {
         glfwPollEvents();
+        const double currentTime = glfwGetTime();
+        const float deltaTime = static_cast<float>(currentTime - previousTime);
+        previousTime = currentTime;
+
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        drawControls(settings, state);
+        drawControls(settings, state, nucleus);
+
+        nucleus.setPhysicsParameters({
+            settings.strongForce,
+            1.5F,
+            settings.coulombForce,
+            settings.damping,
+            5.0F,
+        });
+        if (settings.animate) {
+            nucleus.updatePhysics(deltaTime * settings.animationSpeed);
+        }
 
         int framebufferWidth = 0;
         int framebufferHeight = 0;
@@ -368,20 +388,15 @@ int run(const char* executablePath, bool smokeTest) {
             120.0F
         );
         const glm::mat4 view = state.camera.viewMatrix();
-        const float elapsed = static_cast<float>(glfwGetTime());
-        const float rotation = settings.animate ? elapsed * settings.animationSpeed : 0.0F;
-        const glm::mat4 sceneRotation = glm::rotate(
-            glm::mat4 {1.0F},
-            rotation,
-            glm::normalize(glm::vec3 {0.2F, 0.6F, 1.0F})
-        );
 
         glViewport(0, 0, framebufferWidth, framebufferHeight);
         glClearColor(0.004F, 0.006F, 0.016F, 1.0F);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         if (settings.showGuidePoints) {
-            pointRenderer.render(view * sceneRotation, projection, settings.guidePointSize);
+            const auto points = guidePoints(nucleus);
+            pointRenderer.upload(points);
+            pointRenderer.render(view, projection, settings.guidePointSize);
         }
 
         sphereShader.use();
@@ -389,14 +404,13 @@ int run(const char* executablePath, bool smokeTest) {
         sphereShader.set("projection", projection);
         sphereShader.set("cameraPosition", state.camera.position());
         glBindVertexArray(sphere.vertexArray);
-        for (const Nucleon& nucleon : placeholderNucleus) {
-            glm::mat4 model = sceneRotation;
-            model = glm::translate(model, nucleon.position);
+        for (const the_super::Nucleon& nucleon : nucleus.getNucleons()) {
+            glm::mat4 model = glm::translate(glm::mat4 {1.0F}, nucleon.position);
             model = glm::scale(model, glm::vec3 {settings.nucleonScale});
             sphereShader.set("model", model);
             sphereShader.set(
                 "baseColor",
-                nucleon.proton
+                nucleon.isProton
                     ? glm::vec3 {0.96F, 0.18F, 0.12F}
                     : glm::vec3 {0.18F, 0.48F, 1.0F}
             );
@@ -414,9 +428,49 @@ int run(const char* executablePath, bool smokeTest) {
 
     destroy(sphere);
     if (smokeTest) {
-        std::cout << "smoke-test: rendered " << placeholderNucleus.size()
-                  << " placeholder nucleons\n";
+        std::cout << "smoke-test: simulated and rendered " << nucleus.getNucleons().size()
+                  << " nucleons\n";
     }
+    return 0;
+}
+
+int runPhysicsSmokeTest() {
+    the_super::Nucleus nucleus;
+    std::vector<glm::vec3> initialPositions;
+    initialPositions.reserve(nucleus.getNucleons().size());
+    for (const the_super::Nucleon& nucleon : nucleus.getNucleons()) {
+        initialPositions.push_back(nucleon.position);
+    }
+
+    for (int step = 0; step < 600; ++step) {
+        nucleus.updatePhysics(1.0F / 120.0F);
+    }
+
+    float greatestDisplacement = 0.0F;
+    float greatestRadius = 0.0F;
+    for (std::size_t index = 0; index < nucleus.getNucleons().size(); ++index) {
+        const glm::vec3 position = nucleus.getNucleons()[index].position;
+        if (!std::isfinite(position.x)
+            || !std::isfinite(position.y)
+            || !std::isfinite(position.z)) {
+            throw std::runtime_error("Physics smoke test produced a non-finite position");
+        }
+        greatestDisplacement = std::max(
+            greatestDisplacement,
+            glm::length(position - initialPositions[index])
+        );
+        greatestRadius = std::max(greatestRadius, glm::length(position));
+    }
+
+    if (greatestDisplacement < 0.01F) {
+        throw std::runtime_error("Physics smoke test did not move the nucleons");
+    }
+    if (greatestRadius > nucleus.physicsParameters().boundaryRadius + 1.0e-4F) {
+        throw std::runtime_error("Physics smoke test breached the simulation boundary");
+    }
+
+    std::cout << "physics-test: 600 steps, max displacement=" << greatestDisplacement
+              << ", max radius=" << greatestRadius << '\n';
     return 0;
 }
 
@@ -426,6 +480,9 @@ int main(int argc, char* argv[]) {
     try {
         const char* executablePath = argc > 0 ? argv[0] : "the-super";
         const bool smokeTest = argc > 1 && std::string_view(argv[1]) == "--smoke-test";
+        if (argc > 1 && std::string_view(argv[1]) == "--physics-test") {
+            return runPhysicsSmokeTest();
+        }
         return run(executablePath, smokeTest);
     } catch (const std::exception& exception) {
         std::cerr << "the-super: " << exception.what() << '\n';

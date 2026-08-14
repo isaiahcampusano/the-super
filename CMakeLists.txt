@@ -80,6 +80,7 @@ endfunction()
 add_executable(the-super
     src/Camera.cpp
     src/main.cpp
+    src/Nucleus.cpp
     src/PointCloudRenderer.cpp
     src/ShaderProgram.cpp
 )

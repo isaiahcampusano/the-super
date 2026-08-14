@@ -11,7 +11,9 @@ The starter scene includes:
 - an orbit, pan, and zoom camera;
 - Dear ImGui controls;
 - reusable shader and generic point-cloud wrappers;
-- a small animated proton/neutron placeholder nucleus.
+- a dynamic proton/neutron nucleus driven by Yukawa attraction and softened Coulomb
+  repulsion;
+- real-time controls for force strength, damping, and simulation speed.
 
 ## Build
 
@@ -28,6 +30,9 @@ Run `build/the-super` on single-configuration generators, or
 Use `--smoke-test` to open a hidden window, render three frames, and exit. This still
 requires a working graphical environment.
 
+Use `--physics-test` to advance the default nucleus for 600 steps without opening a
+window and verify that its positions remain finite, bounded, and dynamic.
+
 ## Controls
 
 - Left-drag to orbit.
@@ -38,6 +43,6 @@ requires a working graphical environment.
 
 ## Next steps
 
-Replace the placeholder scene with simulation state, evolve `PointCloudRenderer` into
-an instanced nucleon renderer, and add fission/fusion controls through the existing
-ImGui panel.
+Evolve the sphere loop into an instanced nucleon renderer, then add configurable
+fission/fusion scenarios and collision initial conditions through the existing ImGui
+panel.
