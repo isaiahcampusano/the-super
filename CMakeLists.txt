@@ -79,6 +79,7 @@ endfunction()
 
 add_executable(the-super
     src/Camera.cpp
+    src/CinematicExplosion.cpp
     src/main.cpp
     src/Nucleus.cpp
     src/PointCloudRenderer.cpp

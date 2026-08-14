@@ -58,8 +58,8 @@ void OrbitCamera::zoom(float wheelOffset) {
 
 void OrbitCamera::reset(float distance) {
     target_ = glm::vec3 {0.0F, 0.0F, 0.0F};
-    yaw_ = std::numbers::pi_v<float> * 0.10F;
-    pitch_ = std::numbers::pi_v<float> * 0.08F;
+    yaw_ = std::numbers::pi_v<float> * 0.50F;
+    pitch_ = std::numbers::pi_v<float> * 0.10F;
     distance_ = std::clamp(distance, 1.25F, 80.0F);
 }
 
