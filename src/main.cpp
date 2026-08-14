@@ -5,6 +5,7 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <stdexcept>
@@ -53,7 +54,7 @@ struct AppState {
 };
 
 struct SceneSettings {
-    float nucleonScale {0.62F};
+    float nucleonScale {0.38F};
     float animationSpeed {0.8F};
     float guidePointSize {4.0F};
     float strongForce {1.0F};
@@ -273,7 +274,8 @@ void drawControls(
             : ImVec4(1.0F, 0.75F, 0.25F, 1.0F),
         settings.animate ? "Physics Running" : "Physics Paused"
     );
-    ImGui::SliderFloat("Nucleon size", &settings.nucleonScale, 0.25F, 1.0F, "%.2f");
+    ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+    ImGui::SliderFloat("Nucleon size", &settings.nucleonScale, 0.15F, 0.75F, "%.2f");
     ImGui::Checkbox("Run physics", &settings.animate);
     ImGui::SliderFloat("Animation speed", &settings.animationSpeed, 0.0F, 3.0F, "%.2f");
     ImGui::SliderFloat("Strong Force (g)", &settings.strongForce, 0.0F, 2.0F, "%.3f");
@@ -448,6 +450,7 @@ int runPhysicsSmokeTest() {
 
     float greatestDisplacement = 0.0F;
     float greatestRadius = 0.0F;
+    float minimumSeparation = std::numeric_limits<float>::max();
     for (std::size_t index = 0; index < nucleus.getNucleons().size(); ++index) {
         const glm::vec3 position = nucleus.getNucleons()[index].position;
         if (!std::isfinite(position.x)
@@ -460,6 +463,12 @@ int runPhysicsSmokeTest() {
             glm::length(position - initialPositions[index])
         );
         greatestRadius = std::max(greatestRadius, glm::length(position));
+        for (std::size_t other = index + 1; other < nucleus.getNucleons().size(); ++other) {
+            minimumSeparation = std::min(
+                minimumSeparation,
+                glm::length(position - nucleus.getNucleons()[other].position)
+            );
+        }
     }
 
     if (greatestDisplacement < 0.01F) {
@@ -470,7 +479,8 @@ int runPhysicsSmokeTest() {
     }
 
     std::cout << "physics-test: 600 steps, max displacement=" << greatestDisplacement
-              << ", max radius=" << greatestRadius << '\n';
+              << ", max radius=" << greatestRadius
+              << ", min separation=" << minimumSeparation << '\n';
     return 0;
 }
 
