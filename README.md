@@ -1,4 +1,4 @@
-# The Super
+# hydrogen atom visual sim
 
 An interactive OpenGL sandbox for nuclear particle visualizations. This repository is
 bootstrapped from the rendering infrastructure in
