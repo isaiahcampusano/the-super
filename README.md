@@ -5,18 +5,13 @@ bootstrapped from the rendering infrastructure in
 [`isaiahcampusano/atom`](https://github.com/isaiahcampusano/atom), without its orbital
 math, quantum sampling, or background generation code.
 
-The starter scene includes:
+<img width="665" height="384" alt="image" src="https://github.com/user-attachments/assets/161d709c-00b8-4844-b67c-fe7f3e776956" />
 
-- an OpenGL 3.3 window powered by GLFW and GLAD;
-- an orbit, pan, and zoom camera;
-- Dear ImGui controls;
-- reusable shader and generic point-cloud wrappers;
-- stable, fusion, and fission scenarios driven by Yukawa attraction and softened
-  Coulomb repulsion;
-- real-time controls for force strength, damping, and simulation speed.
-- an optional four-second cinematic bridge from the reaction trigger to a flash,
-  fireball, shockwave, and rising mushroom cloud.
 
+<img width="691" height="391" alt="image" src="https://github.com/user-attachments/assets/ede37238-334f-43a1-8323-d11c06f2ac77" />
+
+
+---
 ## Build
 
 The first configure downloads GLFW, GLM, and Dear ImGui.
